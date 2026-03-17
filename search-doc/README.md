@@ -8,6 +8,30 @@ A Retrieval-Augmented Generation (RAG) application that lets you ask natural lan
 
 The application ingests Markdown documents by splitting them into chunks and storing their embeddings in an in-memory vector store (powered by LangChain and Ollama's `embeddinggemma` model). When you submit a question, the system finds the most relevant chunk using cosine similarity, then passes it as context to the `phi3:mini` LLM, which generates a natural language answer. Responses are streamed token-by-token to the browser so you see results immediately rather than waiting for the full generation.
 
+## Process Diagram
+
+```mermaid
+flowchart TD
+  subgraph Ingestion["Phase 1: Document Ingestion"]
+    A[Markdown files in docs/] --> B[Load file content]
+    B --> C[Split into chunks]
+    C --> D[Generate embeddings<br/>embeddinggemma]
+    D --> E[Store vectors + metadata<br/>vector_store_metadata.json]
+  end
+
+  subgraph Search["Phase 2: Search and Answer"]
+    F[User enters question in UI] --> G[POST /api/search]
+    G --> H[Embed question]
+    H --> I[Cosine similarity search<br/>against stored chunks]
+    I --> J[Top matching chunk as context]
+    J --> K[Build prompt for phi3:mini]
+    K --> L[Stream generated tokens]
+    L --> M[Answer rendered in browser]
+  end
+
+  E -. powers retrieval .-> I
+```
+
 ## Features
 
 - **RAG pipeline** — Markdown documents are chunked, embedded, and stored in a vector store for semantic search.
