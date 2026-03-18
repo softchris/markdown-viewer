@@ -14,7 +14,8 @@
     "skipLibCheck": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitAny": false
   },
-  "include": ["src", "server.ts", "main.ts"]
+  "include": ["src", "server.ts", "main.ts", "ingest.ts", "rag.ts", "ai.ts", "foundry-local-sdk.d.ts"]
 }

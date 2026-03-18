@@ -10,6 +10,7 @@ import cors from "cors";
 import type { Request, Response } from "express";
 import rateLimit from "express-rate-limit";
 import { createServer } from "./server.js";
+import { cleanupFoundryLocal } from "./ai.js";
 
 // Rate limiter: 100 requests per minute per IP
 const limiter = rateLimit({
@@ -30,6 +31,10 @@ const limiter = rateLimit({
 export async function startStreamableHTTPServer(
   createServer: () => McpServer,
 ): Promise<void> {
+  // NOTE: Preloading disabled due to Foundry Local SDK resource management issues
+  // with concurrent requests. Using on-demand loading instead (same pattern as app-rag.js).
+  // This is thread-safe and follows the Foundry Local best practices for HTTP servers.
+
   const port = parseInt(process.env.PORT ?? "3004", 10);
 
   const app = createMcpExpressApp({ host: "127.0.0.1" });
@@ -79,6 +84,7 @@ export async function startStreamableHTTPServer(
 
   const shutdown = () => {
     console.log("\nShutting down...");
+    cleanupFoundryLocal().catch(console.error);
     httpServer.close(() => process.exit(0));
   };
 
@@ -92,18 +98,39 @@ export async function startStreamableHTTPServer(
 export async function startStdioServer(
   createServer: () => McpServer,
 ): Promise<void> {
+  // NOTE: Preloading disabled due to Foundry Local SDK resource management issues.
+  // Using on-demand loading instead (same pattern as app-rag.js).
+  // This is thread-safe and follows Foundry Local best practices.
+
+  process.on("SIGINT", async () => {
+    console.log("\nShutting down...");
+    await cleanupFoundryLocal().catch(console.error);
+    process.exit(0);
+  });
+  process.on("SIGTERM", async () => {
+    console.log("\nShutting down...");
+    await cleanupFoundryLocal().catch(console.error);
+    process.exit(0);
+  });
   await createServer().connect(new StdioServerTransport());
 }
 
 async function main() {
-  if (process.argv.includes("--stdio")) {
-    await startStdioServer(createServer);
-  } else {
-    await startStreamableHTTPServer(createServer);
+  try {
+    if (process.argv.includes("--stdio")) {
+      console.error("Starting MCP server with stdio transport...");
+      await startStdioServer(createServer);
+    } else {
+      console.error("Starting MCP server with HTTP transport...");
+      await startStreamableHTTPServer(createServer);
+    }
+  } catch (e) {
+    console.error("Fatal error:", e);
+    process.exit(1);
   }
 }
 
 main().catch((e) => {
-  console.error(e);
+  console.error("Uncaught error:", e);
   process.exit(1);
 });

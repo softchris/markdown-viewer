@@ -42,6 +42,19 @@ interface ToolPayload {
   filters?: Record<string, unknown>;
 }
 
+interface SearchResult {
+  id: string;
+  title: string;
+  source: string;
+  excerpt: string;
+  score: number;
+}
+
+interface SearchToolPayload {
+  query: string;
+  results: SearchResult[];
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 const ACCENT_COLOURS = [
@@ -374,6 +387,109 @@ const S: Record<string, React.CSSProperties> = {
     fontSize: "var(--font-text-sm-size, 13px)",
     alignSelf: "flex-end",
   },
+  searchPanel: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "14px",
+    marginBottom: "24px",
+    padding: "18px",
+    borderRadius: "var(--border-radius-lg, 12px)",
+    border: "1px solid var(--color-border-primary, #e5e5e5)",
+    background: "var(--color-background-primary, #fff)",
+  },
+  searchHeading: {
+    margin: 0,
+    fontSize: "var(--font-heading-sm-size, 18px)",
+    fontWeight: "var(--font-weight-semibold, 600)" as React.CSSProperties["fontWeight"],
+    color: "var(--color-text-primary, #1a1a1a)",
+  },
+  searchCopy: {
+    margin: 0,
+    color: "var(--color-text-secondary, #666)",
+    fontSize: "var(--font-text-sm-size, 13px)",
+    lineHeight: 1.5,
+  },
+  searchForm: {
+    display: "flex",
+    gap: "10px",
+    flexWrap: "wrap",
+    alignItems: "center",
+  },
+  searchField: {
+    flex: "1 1 280px",
+    minWidth: 0,
+    padding: "10px 12px",
+    borderRadius: "var(--border-radius-md, 8px)",
+    border: "1px solid var(--color-border-primary, #e5e5e5)",
+    background: "var(--color-background-secondary, #f5f5f5)",
+    color: "var(--color-text-primary, #1a1a1a)",
+    fontSize: "var(--font-text-sm-size, 14px)",
+    outline: "none",
+  },
+  searchButton: {
+    padding: "10px 16px",
+    borderRadius: "var(--border-radius-md, 8px)",
+    border: "1px solid transparent",
+    background: "var(--color-text-primary, #1a1a1a)",
+    color: "var(--color-background-primary, #fff)",
+    cursor: "pointer",
+    fontSize: "var(--font-text-sm-size, 14px)",
+    fontWeight: "var(--font-weight-medium, 500)" as React.CSSProperties["fontWeight"],
+  },
+  searchButtonDisabled: {
+    opacity: 0.6,
+    cursor: "not-allowed",
+  },
+  searchMeta: {
+    fontSize: "var(--font-text-sm-size, 13px)",
+    color: "var(--color-text-secondary, #666)",
+  },
+  searchError: {
+    fontSize: "var(--font-text-sm-size, 13px)",
+    color: "#dc2626",
+  },
+  resultList: {
+    display: "grid",
+    gap: "12px",
+  },
+  resultCard: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+    padding: "14px 16px",
+    borderRadius: "var(--border-radius-md, 8px)",
+    border: "1px solid var(--color-border-primary, #e5e5e5)",
+    background: "var(--color-background-secondary, #fafafa)",
+  },
+  resultHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "12px",
+    alignItems: "baseline",
+    flexWrap: "wrap",
+  },
+  resultTitle: {
+    margin: 0,
+    fontSize: "var(--font-text-md-size, 15px)",
+    fontWeight: "var(--font-weight-semibold, 600)" as React.CSSProperties["fontWeight"],
+    color: "var(--color-text-primary, #1a1a1a)",
+  },
+  resultSource: {
+    fontSize: "12px",
+    color: "var(--color-text-secondary, #666)",
+    fontFamily: "var(--font-mono, monospace)",
+  },
+  resultExcerpt: {
+    margin: 0,
+    color: "var(--color-text-secondary, #666)",
+    fontSize: "var(--font-text-sm-size, 13px)",
+    lineHeight: 1.6,
+  },
+  resultScore: {
+    fontSize: "12px",
+    color: "var(--color-text-secondary, #666)",
+    fontFamily: "var(--font-mono, monospace)",
+  },
 };
 
 // ── Sub-components ─────────────────────────────────────────────────────────
@@ -543,6 +659,102 @@ function ProductsView({ products, categories }: { products: Product[]; categorie
   );
 }
 
+function SearchToolPanel({ app }: { app: App }) {
+  const [query, setQuery] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [results, setResults] = useState<SearchResult[]>([]);
+
+  const canCallServerTools = Boolean(app.getHostCapabilities()?.serverTools);
+
+  const runSearch = async () => {
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery || isSearching) return;
+
+    if (!canCallServerTools) {
+      setErrorMessage("This host does not expose MCP server tool calls to the app.");
+      return;
+    }
+
+    setIsSearching(true);
+    setErrorMessage(null);
+
+    try {
+      const result = await app.callServerTool({
+        name: "rag-search",
+        arguments: { query: trimmedQuery },
+      });
+
+      const structured = result.structuredContent as SearchToolPayload | undefined;
+      const textBlock = result.content.find((item) => item.type === "text");
+
+      setSummary(textBlock?.type === "text" ? textBlock.text : null);
+      setResults(structured?.results ?? []);
+    } catch (error) {
+      setSummary(null);
+      setResults([]);
+      setErrorMessage(error instanceof Error ? error.message : "Search failed.");
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  return (
+    <section style={S.searchPanel}>
+      <div>
+        <h2 style={S.searchHeading}>RAG Search</h2>
+        <p style={S.searchCopy}>Run a semantic search against a markdown document. Results are retrieved via Ollama embeddings and answered by a local LLM (phi3:mini).</p>
+      </div>
+
+      <form
+        style={S.searchForm}
+        onSubmit={(event) => {
+          event.preventDefault();
+          void runSearch();
+        }}
+      >
+        <input
+          style={S.searchField}
+          type="search"
+          placeholder="Search the knowledge base"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        <button
+          type="submit"
+          style={{ ...S.searchButton, ...(isSearching || !canCallServerTools ? S.searchButtonDisabled : {}) }}
+          disabled={isSearching || !canCallServerTools || query.trim().length === 0}
+        >
+          {isSearching ? "Searching..." : "Search"}
+        </button>
+      </form>
+
+      {!canCallServerTools && (
+        <div style={S.searchError}>Tool calling is unavailable in the current host context.</div>
+      )}
+
+      {errorMessage && <div style={S.searchError}>{errorMessage}</div>}
+      {summary && <div style={S.searchMeta}>{summary}</div>}
+
+      {results.length > 0 && (
+        <div style={S.resultList}>
+          {results.map((result) => (
+            <article key={result.id} style={S.resultCard}>
+              <div style={S.resultHeader}>
+                <h3 style={S.resultTitle}>{result.title}</h3>
+                <span style={S.resultScore}>score {result.score.toFixed(2)}</span>
+              </div>
+              <div style={S.resultSource}>{result.source}</div>
+              <p style={S.resultExcerpt}>{result.excerpt}</p>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ── Root ────────────────────────────────────────────────────────────────────
 
 function MarkdownViewerApp() {
@@ -607,25 +819,21 @@ interface InnerProps {
   hostContext?: McpUiHostContext;
 }
 
-function MarkdownViewerInner({ payload, hostContext }: InnerProps) {
+function MarkdownViewerInner({ app, payload, hostContext }: InnerProps) {
   const products = payload?.products ?? [];
   const productCategories = payload?.categories ?? [];
 
   const safePad = hostContext?.safeAreaInsets;
 
-  if (products.length === 0) {
-    return (
-      <div style={{ ...S.app, paddingTop: safePad?.top, paddingRight: safePad?.right, paddingBottom: safePad?.bottom, paddingLeft: safePad?.left }}>
-        <div style={S.empty}>Waiting for product data…</div>
-      </div>
-    );
-  }
-
   return (
     <div style={{ ...S.app, paddingTop: safePad?.top, paddingRight: safePad?.right, paddingBottom: safePad?.bottom, paddingLeft: safePad?.left }}>
-      {/* Body */}
       <div style={S.body}>
-        <ProductsView products={products} categories={productCategories} />
+        <SearchToolPanel app={app} />
+        {products.length > 0 ? (
+          <ProductsView products={products} categories={productCategories} />
+        ) : (
+          <div style={S.empty}>Waiting for product data…</div>
+        )}
       </div>
     </div>
   );

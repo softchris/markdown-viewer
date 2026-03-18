@@ -11,5 +11,5 @@
     "strict": true,
     "skipLibCheck": true
   },
-  "include": ["server.ts", "main.ts"]
+  "include": ["server.ts", "main.ts", "ingest.ts", "rag.ts", "ai.ts", "foundry-local-sdk.d.ts"]
 }

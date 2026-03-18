@@ -4,6 +4,12 @@ import type { CallToolResult, ReadResourceResult } from "@modelcontextprotocol/s
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
+import { ingest, search, DEFAULT_SOURCE_FILE, type VectorStoreEntry } from "./rag.js";
+import { generateResponse } from "./ai.js";
+
+// Module-level vector store cache — populated on first RAG search call
+let _vectorStore: VectorStoreEntry[] = [];
+let _ingestedFilePath = "";
 
 // Works both from source (server.ts) and compiled (dist/server.js)
 const DIST_DIR = import.meta.filename.endsWith(".ts")
@@ -27,6 +33,14 @@ interface Product {
   category: string;
   price: number;
   inStock: boolean;
+}
+
+interface SearchResult {
+  id: string;
+  title: string;
+  source: string;
+  excerpt: string;
+  score: number;
 }
 
 function parseProductTable(content: string): Product[] {
@@ -209,6 +223,60 @@ export function createServer(): McpServer {
           structuredContent: { products: [], categories: [], filters: {} },
         };
       }
+    },
+  );
+
+  registerAppTool(
+    server,
+    "rag-search",
+    {
+      title: "RAG Search",
+      description:
+        "Searches a markdown document using semantic similarity via Ollama embeddings, then generates a grounded answer using a local LLM (phi3:mini). Requires Ollama to be running with the 'embeddinggemma' and 'phi3:mini' models.",
+      inputSchema: z.object({
+        query: z.string().min(1).describe("The natural language search query to run against the document index."),
+        filePath: z.string().optional().describe("Path to the markdown file to search. Defaults to the bundled sample document."),
+      }),
+      _meta: { ui: { resourceUri } },
+    },
+    async (args: { query: string; filePath?: string }): Promise<CallToolResult> => {
+      const sourceFile = args.filePath ? path.resolve(args.filePath) : path.resolve(DEFAULT_SOURCE_FILE);
+
+      // (Re-)ingest if the source file has changed or the store is empty
+      if (sourceFile !== _ingestedFilePath || _vectorStore.length === 0) {
+        _vectorStore = await ingest(sourceFile);
+        _ingestedFilePath = sourceFile;
+      }
+
+      const { content: context, chunkIndex, score, source } = await search(args.query, _vectorStore);
+
+      if (!context) {
+        return {
+          content: [{ type: "text", text: "No relevant content found for your query." }],
+          structuredContent: { query: args.query, results: [] },
+        };
+      }
+
+      const aiResponse = await generateResponse(args.query, context);
+
+      // Extract the first heading from the chunk as its title, or fall back to the first non-empty line
+      const titleMatch = context.match(/^#{1,6}\s+(.+)$/m);
+      const title = titleMatch ? titleMatch[1].trim() : (context.split("\n").find((l) => l.trim()) ?? "Result");
+
+      const results: SearchResult[] = [
+        {
+          id: `chunk-${chunkIndex}`,
+          title,
+          source: path.basename(source),
+          excerpt: context.length > 300 ? context.slice(0, 300) + "\u2026" : context,
+          score: parseFloat(score.toFixed(4)),
+        },
+      ];
+
+      return {
+        content: [{ type: "text", text: aiResponse }],
+        structuredContent: { query: args.query, results },
+      };
     },
   );
 
